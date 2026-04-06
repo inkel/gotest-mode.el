@@ -97,14 +97,18 @@ via a recursive directory search."
 (defun gotest--run (args &optional extra-flags)
   "Run `go test' with ARGS from the transient and optional EXTRA-FLAGS.
 EXTRA-FLAGS are prepended before ARGS (and before the package pattern).
+If ARGS contains a `-package=' entry it is used as the package pattern
+instead of `gotest-default-package' and is stripped before invoking go.
 The command runs in the module root directory."
   (let* ((root (gotest--module-root))
-         (cmd (mapconcat #'identity
-                         (append (list gotest-go-executable "test")
-                                 extra-flags
-                                 args
-                                 (list gotest-default-package))
-                         " ")))
+         (pkg  (or (transient-arg-value "-package=" args) gotest-default-package))
+         (args (cl-remove-if (lambda (a) (string-prefix-p "-package=" a)) args))
+         (cmd  (mapconcat #'identity
+                          (append (list gotest-go-executable "test")
+                                  extra-flags
+                                  args
+                                  (list pkg))
+                          " ")))
     (let ((default-directory root))
       (compilation-start cmd #'gotest-compilation-mode (lambda (_) gotest-compilation-buffer-name)))))
 
@@ -133,18 +137,48 @@ KIND is `test' or `benchmark'; NAME is the Go function name string."
       ('test      (gotest--run nil (list (concat "-run=" pattern))))
       ('benchmark (gotest--run nil (list (concat "-bench=" pattern) "-run=^$"))))))
 
+(defun gotest--current-package ()
+  "Return the package set in the active transient invocation, or the default.
+Reads directly from `transient--suffixes' (the live infix state) so that
+test/benchmark completion lists honour a package already selected by the user."
+  (or (and (boundp 'transient--suffixes)
+           (cl-some (lambda (obj)
+                      (and (slot-exists-p obj 'argument)
+                           (equal (oref obj argument) "-package=")
+                           (oref obj value)))
+                    transient--suffixes))
+      gotest-default-package))
+
+(defun gotest--list-packages ()
+  "Return Go package import paths in the module via `go list'.
+The default package pattern is prepended so it always appears as a choice."
+  (let ((default-directory (gotest--module-root)))
+    (with-temp-buffer
+      (call-process gotest-go-executable nil '(t nil) nil
+                    "list" gotest-default-package)
+      (cons gotest-default-package
+            (split-string (buffer-string) "\n" t)))))
+
+(defun gotest--read-package (prompt initial-input history)
+  "Read a Go package path with completion from `go list'."
+  (completing-read prompt (gotest--list-packages)
+                   nil nil initial-input history))
+
 (defun gotest--list-functions (prefix)
   "Return Go test/benchmark names starting with PREFIX via `go test -list'.
 Runs `go test -list=^PREFIX' in the module root and returns only lines
 that begin with PREFIX, filtering out summary lines like \"ok\" or \"FAIL\".
 Benchmarks require `-bench=.' to appear in the listing, so it is added
-automatically when PREFIX is \"Benchmark\"."
+automatically when PREFIX is \"Benchmark\".
+Uses the package currently selected in the transient (if any) so that
+completion reflects the chosen package."
   (let ((default-directory (gotest--module-root))
+        (pkg   (gotest--current-package))
         (extra (when (string-prefix-p "Benchmark" prefix) '("-bench=."))))
     (with-temp-buffer
       (apply #'call-process gotest-go-executable nil '(t nil) nil
              "test" (concat "-list=^" prefix)
-             (append extra (list gotest-default-package)))
+             (append extra (list pkg)))
       (seq-filter (lambda (s) (string-prefix-p prefix s))
                   (split-string (buffer-string) "\n" t)))))
 
@@ -204,6 +238,15 @@ Signals a user error if point is not inside a test or benchmark."
   :argument "-tags="
   :prompt "Build tags: ")
 
+(transient-define-argument gotest:--package ()
+  "Package pattern to test (overrides `gotest-default-package')."
+  :description "Package"
+  :class 'transient-option
+  :key "-P"
+  :argument "-package="
+  :prompt "Package: "
+  :reader #'gotest--read-package)
+
 (transient-define-argument gotest:--bench ()
   "Benchmark name regexp."
   :description "Benchmark regexp"
@@ -257,7 +300,8 @@ Signals a user error if point is not inside a test or benchmark."
    (gotest:--run)
    (gotest:--tags)
    (gotest:--count)
-   (gotest:--timeout)]
+   (gotest:--timeout)
+   (gotest:--package)]
   ["Run"
    ("b" "Run benchmarks" gotest-benchmark)])
 
@@ -271,7 +315,8 @@ Signals a user error if point is not inside a test or benchmark."
    (gotest:--run)
    (gotest:--tags)
    (gotest:--count)
-   (gotest:--timeout)]
+   (gotest:--timeout)
+   (gotest:--package)]
   ["Actions"
    ("t" "Run tests"      gotest-test)
    ("b" "Run benchmarks" gotest-benchmark-dispatch)])
