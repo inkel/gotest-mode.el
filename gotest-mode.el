@@ -47,6 +47,43 @@ Use \"./...\" to test the entire module, or \".\" for the current package."
   :type 'string
   :group 'gotest)
 
+;;; Compilation mode
+
+(defconst gotest--error-regexps
+  '(;; Test failure lines: "    foo_test.go:42: some message"
+    (gotest-test-failure
+     "^[[:space:]]+\\([^[:space:]\n:]+\\.go\\):\\([0-9]+\\):"
+     1 2 nil 2)
+    ;; Panic stack frames: "\t/path/to/file.go:42 +0x..."
+    (gotest-panic
+     "^\t\\([^\t\n]+\\.go\\):\\([0-9]+\\)"
+     1 2 nil 2))
+  "Compilation error regexp entries for `go test' output.")
+
+(defun gotest--find-file (filename)
+  "Locate FILENAME by searching recursively under the module root.
+Absolute paths are returned as-is.  Relative paths are first tried
+directly under `default-directory' (the module root), then located
+via a recursive directory search."
+  (if (file-name-absolute-p filename)
+      filename
+    (let ((direct (expand-file-name filename default-directory)))
+      (if (file-exists-p direct)
+          direct
+        (car (directory-files-recursively
+              default-directory
+              (concat "\\`" (regexp-quote (file-name-nondirectory filename)) "\\'")))))))
+
+(define-compilation-mode gotest-compilation-mode "Go Test"
+  "Compilation mode for `go test' output with clickable file links."
+  (dolist (entry gotest--error-regexps)
+    (add-to-list 'compilation-error-regexp-alist-alist entry))
+  (setq-local compilation-error-regexp-alist
+              (append (mapcar #'car gotest--error-regexps)
+                      compilation-error-regexp-alist))
+  (setq-local compilation-parse-errors-filename-function
+              #'gotest--find-file))
+
 ;;; Helpers
 
 (defun gotest--module-root ()
@@ -67,7 +104,7 @@ The command runs in the module root directory."
                                  (list gotest-default-package))
                          " ")))
     (let ((default-directory root))
-      (compilation-start cmd nil (lambda (_) gotest-compilation-buffer-name)))))
+      (compilation-start cmd #'gotest-compilation-mode (lambda (_) gotest-compilation-buffer-name)))))
 
 ;;; Named infix arguments
 
