@@ -1,0 +1,138 @@
+#+title: gotest-mode.el
+#+author:
+#+language: en
+
+Run Go tests and benchmarks from Emacs using a [[https://github.com/magit/transient][Transient]] menu.
+
+* Features
+
+- Run =go test= or =go test -bench= via a menu-driven interface
+- Filter tests by name with =-run= regexp
+- Toggle flags like =-v= (verbose), =-count=, =-timeout=
+- Benchmark-specific options: =-bench= regexp, =-benchmem=, =-benchtime=
+- Output appears in a =compilation-mode= buffer with error navigation
+- Automatically runs from the Go module root (=go.mod= directory)
+
+* Installation
+
+** use-package (straight.el)
+
+#+begin_src emacs-lisp
+(use-package gotest-mode
+  :straight (:host github :repo "inkel/gotest-mode.el")
+  :hook (go-mode . gotest-mode))
+#+end_src
+
+** use-package (elpaca)
+
+#+begin_src emacs-lisp
+(use-package gotest-mode
+  :elpaca (:host github :repo "inkel/gotest-mode.el")
+  :hook (go-mode . gotest-mode))
+#+end_src
+
+** Manual
+
+Clone the repository and add it to your load path:
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/gotest-mode.el")
+(require 'gotest-mode)
+(add-hook 'go-mode-hook #'gotest-mode)
+#+end_src
+
+If you use =use-package=, add =:ensure nil= to prevent it from trying to
+fetch the package from ELPA/MELPA:
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/gotest-mode.el")
+(use-package gotest-mode
+  :ensure nil
+  :hook (go-mode . gotest-mode))
+#+end_src
+
+* Usage
+
+With =gotest-mode= active in a Go buffer, press =C-c t= to open the menu:
+
+#+begin_example
+Run Go tests and benchmarks
+-v  Verbose
+-r  Test name regexp
+-c  Run count  (1)
+-d  Timeout
+
+t  Run tests
+b  Run benchmarks
+#+end_example
+
+Press =t= to run tests immediately, or set options first then press =t=.
+
+Press =b= to open the benchmark sub-menu with additional options:
+
+#+begin_example
+Run Go benchmarks
+-B  Benchmark regexp  (.)
+-m  Memory allocations
+-T  Benchmark time
+
+-v  Verbose
+-r  Test name regexp
+-c  Run count  (1)
+-d  Timeout
+
+b  Run benchmarks
+#+end_example
+
+* Configuration
+
+** Overriding the default key binding
+
+The default binding is =C-c t=. To use a different key, rebind it in
+your =use-package= declaration:
+
+#+begin_src emacs-lisp
+(use-package gotest-mode
+  :straight (:host github :repo "inkel/gotest-mode.el")
+  :hook (go-mode . gotest-mode)
+  :bind (:map gotest-mode-map
+              ("C-c C-t" . gotest-dispatch)))
+#+end_src
+
+Or to set a global binding instead of using the minor mode:
+
+#+begin_src emacs-lisp
+(use-package gotest-mode
+  :straight (:host github :repo "inkel/gotest-mode.el")
+  :bind ("C-c C-t" . gotest-dispatch))
+#+end_src
+
+** Customization
+
+| Variable                        | Default        | Description                        |
+|---------------------------------+----------------+------------------------------------|
+| =gotest-go-executable=          | ="go"=         | Path to the Go binary              |
+| =gotest-default-package=        | ="./..."=      | Package pattern passed to go test  |
+| =gotest-compilation-buffer-name= | ="*Go Test*"= | Name of the output buffer          |
+
+To run only the current package instead of the whole module:
+
+#+begin_src emacs-lisp
+(setq gotest-default-package ".")
+#+end_src
+
+Or set it per-project via =.dir-locals.el=:
+
+#+begin_src emacs-lisp
+((go-mode . ((gotest-default-package . "."))))
+#+end_src
+
+* Requirements
+
+- Emacs 28.1+
+- [[https://github.com/magit/transient][transient]] 0.6.0+
+- Go toolchain on =PATH= (or set =gotest-go-executable=)
+
+* License
+
+GPL-3.0-or-later
