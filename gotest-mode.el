@@ -96,6 +96,14 @@ The command runs in the module root directory."
   :argument "-timeout="
   :prompt "Timeout (e.g. 30s): ")
 
+(transient-define-argument gotest:--tags ()
+  "Build tags to pass to go test."
+  :description "Build tags"
+  :class 'transient-option
+  :key "-T"
+  :argument "-tags="
+  :prompt "Build tags: ")
+
 (transient-define-argument gotest:--bench ()
   "Benchmark name regexp."
   :description "Benchmark regexp"
@@ -109,7 +117,7 @@ The command runs in the module root directory."
   "Duration or iteration count per benchmark (e.g. 10s, 100x)."
   :description "Benchmark time"
   :class 'transient-option
-  :key "-T"
+  :key "-t"
   :argument "-benchtime="
   :prompt "Benchtime (e.g. 10s, 100x): ")
 
@@ -146,6 +154,7 @@ The command runs in the module root directory."
   ["Shared Options"
    ("-v" "Verbose" "-v")
    (gotest:--run)
+   (gotest:--tags)
    (gotest:--count)
    (gotest:--timeout)]
   ["Run"
@@ -159,6 +168,7 @@ The command runs in the module root directory."
   ["Test Options"
    ("-v" "Verbose" "-v")
    (gotest:--run)
+   (gotest:--tags)
    (gotest:--count)
    (gotest:--timeout)]
   ["Actions"
