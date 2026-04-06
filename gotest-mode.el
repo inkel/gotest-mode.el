@@ -10,13 +10,15 @@
 ;;; Commentary:
 
 ;; Run Go tests and benchmarks from Emacs using a Transient menu.
-;; The main entry point is `gotest-dispatch', bound to C-c t by default
+;; The main entry point is `gotest-dwim', bound to C-c t by default
 ;; when `gotest-mode' is active.
 ;;
 ;; Usage:
 ;;   (add-hook 'go-mode-hook #'gotest-mode)
 ;;
-;; Then press C-c t in a Go buffer to open the menu.
+;; Then press C-c t in a Go buffer to open the Transient menu.
+;; Press C-u C-c t inside a test or benchmark function to run it directly.
+;; Click on any `func TestXXX' or `func BenchmarkXXX' line to run it.
 
 ;;; Code:
 
@@ -105,6 +107,41 @@ The command runs in the module root directory."
                          " ")))
     (let ((default-directory root))
       (compilation-start cmd #'gotest-compilation-mode (lambda (_) gotest-compilation-buffer-name)))))
+
+(defun gotest--function-at-point ()
+  "Return (KIND . NAME) if point is on or inside a test/benchmark function.
+KIND is `test' or `benchmark'; NAME is the Go function name string.
+Returns nil when the nearest enclosing function is not a test or benchmark."
+  (save-excursion
+    (beginning-of-line)
+    ;; re-search-backward does not match at point, so check current line first.
+    (unless (looking-at "^func ")
+      (re-search-backward "^func " nil t))
+    (let ((line (buffer-substring-no-properties (point) (line-end-position))))
+      (cond
+       ((string-match "^func \\(Test[[:alnum:]_]+\\)(" line)
+        (cons 'test (match-string 1 line)))
+       ((string-match "^func \\(Benchmark[[:alnum:]_]+\\)(" line)
+        (cons 'benchmark (match-string 1 line)))
+       (t nil)))))
+
+(defun gotest--run-function (kind name)
+  "Run the single test or benchmark identified by KIND and NAME.
+KIND is `test' or `benchmark'; NAME is the Go function name string."
+  (let ((pattern (concat "^" (regexp-quote name) "$")))
+    (pcase kind
+      ('test      (gotest--run nil (list (concat "-run=" pattern))))
+      ('benchmark (gotest--run nil (list (concat "-bench=" pattern) "-run=^$"))))))
+
+;;;###autoload
+(defun gotest-run-function-at-point ()
+  "Run the test or benchmark function enclosing point.
+Signals a user error if point is not inside a test or benchmark."
+  (interactive)
+  (let ((fn (gotest--function-at-point)))
+    (if fn
+        (gotest--run-function (car fn) (cdr fn))
+      (user-error "Not inside a test or benchmark function"))))
 
 ;;; Named infix arguments
 
@@ -212,21 +249,98 @@ The command runs in the module root directory."
    ("t" "Run tests"      gotest-test)
    ("b" "Run benchmarks" gotest-benchmark-dispatch)])
 
+;;; Overlays
+
+(defvar-local gotest--overlays nil
+  "List of overlays created by `gotest-mode' for clickable test/benchmark lines.")
+
+(defvar-local gotest--refresh-timer nil
+  "Idle timer used to debounce overlay refresh after buffer changes.")
+
+(defun gotest--make-overlay (beg end kind name)
+  "Create a clickable overlay from BEG to END for function KIND NAME.
+KIND is `test' or `benchmark'; NAME is the Go function name string."
+  (let ((ov (make-overlay beg end)))
+    (overlay-put ov 'gotest-button t)
+    (overlay-put ov 'mouse-face 'highlight)
+    (overlay-put ov 'help-echo (format "mouse-1: run %s" name))
+    (overlay-put ov 'keymap
+                 (let ((km (make-sparse-keymap)))
+                   (define-key km [mouse-1]
+                     (lambda (_event)
+                       (interactive "e")
+                       (gotest--run-function kind name)))
+                   km))
+    ov))
+
+(defun gotest--remove-overlays ()
+  "Delete all gotest overlays in the current buffer."
+  (mapc #'delete-overlay gotest--overlays)
+  (setq gotest--overlays nil))
+
+(defun gotest--refresh-overlays ()
+  "Remove and recreate clickable overlays for all test/benchmark declarations."
+  (gotest--remove-overlays)
+  (save-excursion
+    (goto-char (point-min))
+    (while (re-search-forward
+            "^func \\(Test\\|Benchmark\\)\\([[:alnum:]_]+\\)(" nil t)
+      (let* ((kind-str  (match-string 1))
+             (func-name (concat kind-str (match-string 2)))
+             (kind      (if (string= kind-str "Test") 'test 'benchmark))
+             (ov        (gotest--make-overlay
+                         (line-beginning-position) (line-end-position)
+                         kind func-name)))
+        (push ov gotest--overlays)))))
+
+(defun gotest--schedule-refresh (&rest _)
+  "Schedule an idle-timer refresh of gotest overlays."
+  (when gotest--refresh-timer
+    (cancel-timer gotest--refresh-timer))
+  (setq gotest--refresh-timer
+        (run-with-idle-timer
+         0.5 nil
+         (let ((buf (current-buffer)))
+           (lambda ()
+             (when (buffer-live-p buf)
+               (with-current-buffer buf
+                 (gotest--refresh-overlays))))))))
+
 ;;; Minor mode
+
+(defun gotest-dwim (arg)
+  "Open the gotest dispatch menu, or with prefix ARG run function at point.
+With a prefix argument, run the test or benchmark enclosing point directly.
+Without a prefix argument, open the Transient menu."
+  (interactive "P")
+  (if arg
+      (gotest-run-function-at-point)
+    (gotest-dispatch)))
 
 (defvar gotest-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c t") #'gotest-dispatch)
+    (define-key map (kbd "C-c t") #'gotest-dwim)
     map)
   "Keymap for `gotest-mode'.")
 
 ;;;###autoload
 (define-minor-mode gotest-mode
   "Minor mode for running Go tests via Transient.
-Binds \\[gotest-dispatch] to open the test/benchmark menu."
+Binds \\[gotest-dwim] to open the test/benchmark menu, or with a prefix
+argument run the test/benchmark function at point.  Adds clickable overlays
+on test and benchmark function declaration lines."
   :lighter " GoTest"
   :keymap gotest-mode-map
-  :group 'gotest)
+  :group 'gotest
+  (if gotest-mode
+      (progn
+        (gotest--refresh-overlays)
+        (add-hook 'after-change-functions #'gotest--schedule-refresh nil t))
+    (gotest--remove-overlays)
+    (when gotest--refresh-timer
+      (cancel-timer gotest--refresh-timer)
+      (setq gotest--refresh-timer nil))
+    (remove-hook 'after-change-functions #'gotest--schedule-refresh t)))
 
 ;;;###autoload
 (defun gotest-maybe-enable ()

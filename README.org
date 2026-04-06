@@ -12,6 +12,8 @@ Run Go tests and benchmarks from Emacs using a [[https://github.com/magit/transi
 - Benchmark-specific options: =-bench= regexp, =-benchmem=, =-benchtime=
 - Output appears in a =compilation-mode= buffer with error navigation
 - Automatically runs from the Go module root (=go.mod= directory)
+- Press =C-u C-c t= inside any =func TestXXX= or =func BenchmarkXXX= to run it directly
+- Clickable overlays on test/benchmark =func= lines: mouse-1 runs that function
 
 * Installation
 
@@ -67,6 +69,21 @@ b  Run benchmarks
 #+end_example
 
 Press =t= to run tests immediately, or set options first then press =t=.
+
+Press =b= to open the benchmark sub-menu with additional options.
+
+** Running a single test or benchmark
+
+With point anywhere inside a =func TestFoo= or =func BenchmarkFoo= body,
+press =C-u C-c t= to run only that function (no menu appears):
+
+#+begin_example
+go test -run=^TestFoo$ ./...
+go test -bench=^BenchmarkFoo$ -run=^$ ./...
+#+end_example
+
+You can also click with mouse-1 on any =func Test...= or =func Benchmark...=
+line — gotest-mode adds a clickable overlay that runs the function directly.
 
 Press =b= to open the benchmark sub-menu with additional options:
 
