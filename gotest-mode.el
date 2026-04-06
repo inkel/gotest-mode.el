@@ -133,6 +133,31 @@ KIND is `test' or `benchmark'; NAME is the Go function name string."
       ('test      (gotest--run nil (list (concat "-run=" pattern))))
       ('benchmark (gotest--run nil (list (concat "-bench=" pattern) "-run=^$"))))))
 
+(defun gotest--list-functions (prefix)
+  "Return Go test/benchmark names starting with PREFIX via `go test -list'.
+Runs `go test -list=^PREFIX' in the module root and returns only lines
+that begin with PREFIX, filtering out summary lines like \"ok\" or \"FAIL\".
+Benchmarks require `-bench=.' to appear in the listing, so it is added
+automatically when PREFIX is \"Benchmark\"."
+  (let ((default-directory (gotest--module-root))
+        (extra (when (string-prefix-p "Benchmark" prefix) '("-bench=."))))
+    (with-temp-buffer
+      (apply #'call-process gotest-go-executable nil '(t nil) nil
+             "test" (concat "-list=^" prefix)
+             (append extra (list gotest-default-package)))
+      (seq-filter (lambda (s) (string-prefix-p prefix s))
+                  (split-string (buffer-string) "\n" t)))))
+
+(defun gotest--read-test-name (prompt initial-input history)
+  "Read a test name with completion from `go test -list'."
+  (completing-read prompt (gotest--list-functions "Test")
+                   nil nil initial-input history))
+
+(defun gotest--read-bench-name (prompt initial-input history)
+  "Read a benchmark name with completion from `go test -list'."
+  (completing-read prompt (gotest--list-functions "Benchmark")
+                   nil nil initial-input history))
+
 ;;;###autoload
 (defun gotest-run-function-at-point ()
   "Run the test or benchmark function enclosing point.
@@ -151,7 +176,8 @@ Signals a user error if point is not inside a test or benchmark."
   :class 'transient-option
   :key "-r"
   :argument "-run="
-  :prompt "Run tests matching: ")
+  :prompt "Run tests matching: "
+  :reader #'gotest--read-test-name)
 
 (transient-define-argument gotest:--count ()
   "Number of times to run each test."
@@ -185,7 +211,8 @@ Signals a user error if point is not inside a test or benchmark."
   :key "-B"
   :argument "-bench="
   :prompt "Run benchmarks matching: "
-  :init-value (lambda (obj) (oset obj value ".")))
+  :init-value (lambda (obj) (oset obj value "."))
+  :reader #'gotest--read-bench-name)
 
 (transient-define-argument gotest:--benchtime ()
   "Duration or iteration count per benchmark (e.g. 10s, 100x)."
