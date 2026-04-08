@@ -94,6 +94,26 @@ via a recursive directory search."
            (locate-dominating-file buffer-file-name "go.mod"))
       default-directory))
 
+(defun gotest--handle-finish (buffer msg)
+  "Handle go test completion for BUFFER with exit message MSG.
+If all tests passed, show elapsed time in the minibuffer and leave the
+buffer hidden.  On any failure or build error, display the buffer."
+  (if (string= msg "finished\n")
+      (let (times)
+        (with-current-buffer buffer
+          (goto-char (point-min))
+          (while (re-search-forward
+                  "^ok[[:space:]].*[[:space:]]\\([0-9.]+s\\)$" nil t)
+            (push (match-string 1) times)))
+        (let* ((n (length times))
+               (elapsed (pcase n
+                          (0 nil)
+                          (1 (car times))
+                          (_ (format "%d packages" n)))))
+          (message "All tests passed%s"
+                   (if elapsed (format " (%s)" elapsed) ""))))
+    (display-buffer buffer)))
+
 (defun gotest--run (args &optional extra-flags)
   "Run `go test' with ARGS from the transient and optional EXTRA-FLAGS.
 EXTRA-FLAGS are prepended before ARGS (and before the package pattern).
@@ -109,8 +129,18 @@ The command runs in the module root directory."
                                   args
                                   (list pkg))
                           " ")))
-    (let ((default-directory root))
-      (compilation-start cmd #'gotest-compilation-mode (lambda (_) gotest-compilation-buffer-name)))))
+    (let ((default-directory root)
+          compile-buf finish-fn)
+      (setq finish-fn
+            (lambda (buffer msg)
+              (when (eq buffer compile-buf)
+                (remove-hook 'compilation-finish-functions finish-fn)
+                (gotest--handle-finish buffer msg))))
+      (add-hook 'compilation-finish-functions finish-fn)
+      (setq compile-buf
+            (save-window-excursion
+              (compilation-start cmd #'gotest-compilation-mode
+                                 (lambda (_) gotest-compilation-buffer-name)))))))
 
 (defun gotest--function-at-point ()
   "Return (KIND . NAME) if point is on or inside a test/benchmark function.
