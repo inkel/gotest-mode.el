@@ -249,8 +249,7 @@ Signals a user error if point is not inside a test or benchmark."
   :class 'transient-option
   :key "-c"
   :argument "-count="
-  :prompt "Count: "
-  :init-value (lambda (obj) (oset obj value "1")))
+  :prompt "Count: ")
 
 (transient-define-argument gotest:--timeout ()
   "Test timeout duration (e.g. 30s, 5m)."
