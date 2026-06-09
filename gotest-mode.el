@@ -279,6 +279,39 @@ Signals a user error if point is not inside a test or benchmark."
         (gotest--run-function (car fn) (cdr fn))
       (user-error "Not inside a test or benchmark function"))))
 
+;;;###autoload
+(defun gotest-next-test-or-benchmark ()
+  "Navigate to the next test or benchmark function."
+  (interactive)
+  (let ((start (point)))
+    (end-of-line)
+    (if (re-search-forward "^func \\(Test\\|Benchmark\\)[[:alnum:]_]+(" nil t)
+        (progn
+          (beginning-of-line)
+          (recenter))
+      (goto-char start)
+      (message "No more tests or benchmarks"))))
+
+;;;###autoload
+(defun gotest-previous-test-or-benchmark ()
+  "Navigate to the previous test or benchmark function."
+  (interactive)
+  (let ((start (point)))
+    (beginning-of-line)
+    (if (re-search-backward "^func \\(Test\\|Benchmark\\)[[:alnum:]_]+(" nil t)
+        (recenter)
+      (goto-char start)
+      (message "No previous tests or benchmarks"))))
+
+;;;###autoload
+(defun gotest-list-tests-and-benchmarks ()
+  "Show a list of all tests and benchmarks using imenu."
+  (interactive)
+  (let ((imenu-generic-expression
+         '(("Tests" "^func \\(Test[[:alnum:]_]+\\)(" 1)
+           ("Benchmarks" "^func \\(Benchmark[[:alnum:]_]+\\)(" 1))))
+    (call-interactively 'imenu)))
+
 ;;; Named infix arguments
 
 (transient-define-argument gotest:--run ()
@@ -395,7 +428,11 @@ Signals a user error if point is not inside a test or benchmark."
    (gotest:--package)]
   ["Actions"
    ("t" "Run tests"      gotest-test)
-   ("b" "Run benchmarks" gotest-benchmark-dispatch)])
+   ("b" "Run benchmarks" gotest-benchmark-dispatch)]
+  ["Navigate"
+   ("n" "Next test/benchmark"     gotest-next-test-or-benchmark)
+   ("p" "Previous test/benchmark" gotest-previous-test-or-benchmark)
+   ("l" "List tests/benchmarks"   gotest-list-tests-and-benchmarks)])
 
 ;;; Overlays
 
