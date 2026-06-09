@@ -10,14 +10,15 @@
 ;;; Commentary:
 
 ;; Run Go tests and benchmarks from Emacs using a Transient menu.
-;; The main entry point is `gotest-dwim', bound to C-c t by default
+;; The main entry point is `gotest-dwim', bound to s-t by default
 ;; when `gotest-mode' is active.
 ;;
 ;; Usage:
 ;;   (add-hook 'go-mode-hook #'gotest-mode)
 ;;
-;; Then press C-c t in a Go buffer to open the Transient menu.
-;; Press C-u C-c t inside a test or benchmark function to run it directly.
+;; Then press s-t in a Go buffer to open the Transient menu.
+;; Press C-u s-t inside a test, benchmark, or production function to run
+;; the corresponding test/benchmark directly.
 ;; Click on any `func TestXXX' or `func BenchmarkXXX' line to run it.
 
 ;;; Code:
@@ -158,6 +159,52 @@ Returns nil when the nearest enclosing function is not a test or benchmark."
        ((string-match "^func \\(Benchmark[[:alnum:]_]+\\)(" line)
         (cons 'benchmark (match-string 1 line)))
        (t nil)))))
+
+(defun gotest--production-function-at-point ()
+  "Return (TYPE . NAME) for production function at point.
+TYPE is `standalone' for top-level functions or `method' for struct methods.
+NAME is the function name for standalone, or (RECEIVER . METHOD) for methods.
+Returns nil if not in a production function or if in a test/benchmark."
+  (save-excursion
+    (beginning-of-line)
+    ;; re-search-backward does not match at point, so check current line first.
+    (unless (looking-at "^func ")
+      (re-search-backward "^func " nil t))
+    (let ((line (buffer-substring-no-properties (point) (line-end-position))))
+      (cond
+       ;; Skip test and benchmark functions
+       ((string-match "^func \\(Test\\|Benchmark\\)[[:alnum:]_]+" line)
+        nil)
+       ;; Method: func (receiver Type) MethodName(...)
+       ;; Matches both (f Foo) and (f *Foo) receivers
+       ((string-match "^func (\\([[:alnum:]_]+\\) \\([*]?\\)\\([[:alnum:]_]+\\)) \\([[:alnum:]_]+\\)(" line)
+        (let ((receiver-type (match-string 3 line))
+              (method-name (match-string 4 line)))
+          (cons 'method (cons receiver-type method-name))))
+       ;; Standalone: func FunctionName(...)
+       ((string-match "^func \\([[:alnum:]_]+\\)(" line)
+        (cons 'standalone (match-string 1 line)))
+       (t nil)))))
+
+(defun gotest--test-name-for-production-function (prod-fn)
+  "Return test name for production function PROD-FN.
+PROD-FN is (TYPE . NAME) from `gotest--production-function-at-point'."
+  (pcase prod-fn
+    (`(standalone . ,name)
+     (concat "Test" name))
+    (`(method . (,receiver . ,method))
+     (concat "Test" receiver "_" method))
+    (_ nil)))
+
+(defun gotest--benchmark-name-for-production-function (prod-fn)
+  "Return benchmark name for production function PROD-FN.
+PROD-FN is (TYPE . NAME) from `gotest--production-function-at-point'."
+  (pcase prod-fn
+    (`(standalone . ,name)
+     (concat "Benchmark" name))
+    (`(method . (,receiver . ,method))
+     (concat "Benchmark" receiver "_" method))
+    (_ nil)))
 
 (defun gotest--run-function (kind name)
   "Run the single test or benchmark identified by KIND and NAME.
@@ -411,16 +458,36 @@ KIND is `test' or `benchmark'; NAME is the Go function name string."
 
 (defun gotest-dwim (arg)
   "Open the gotest dispatch menu, or with prefix ARG run function at point.
-With a prefix argument, run the test or benchmark enclosing point directly.
+With a prefix argument, run the test or benchmark enclosing point directly,
+or if in a production function, run its corresponding test or benchmark.
 Without a prefix argument, open the Transient menu."
   (interactive "P")
   (if arg
-      (gotest-run-function-at-point)
+      (let ((test-fn (gotest--function-at-point))
+            (prod-fn (gotest--production-function-at-point)))
+        (cond
+         ;; Inside a test or benchmark function
+         (test-fn
+          (gotest--run-function (car test-fn) (cdr test-fn)))
+         ;; Inside a production function - try test first, then benchmark
+         (prod-fn
+          (let ((test-name (gotest--test-name-for-production-function prod-fn))
+                (bench-name (gotest--benchmark-name-for-production-function prod-fn)))
+            ;; Try to find and run the test; if not found, try benchmark
+            (if (and test-name
+                     (member test-name (gotest--list-functions "Test")))
+                (gotest--run-function 'test test-name)
+              (if (and bench-name
+                       (member bench-name (gotest--list-functions "Benchmark")))
+                  (gotest--run-function 'benchmark bench-name)
+                (user-error "No test or benchmark found for this function")))))
+         (t
+          (user-error "Not inside a test, benchmark, or production function"))))
     (gotest-dispatch)))
 
 (defvar gotest-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c t") #'gotest-dwim)
+    (define-key map (kbd "s-t") #'gotest-dwim)
     map)
   "Keymap for `gotest-mode'.")
 
@@ -428,7 +495,8 @@ Without a prefix argument, open the Transient menu."
 (define-minor-mode gotest-mode
   "Minor mode for running Go tests via Transient.
 Binds \\[gotest-dwim] to open the test/benchmark menu, or with a prefix
-argument run the test/benchmark function at point.  Adds clickable overlays
+argument run the test/benchmark for the function at point (works for
+test/benchmark functions and production functions).  Adds clickable overlays
 on test and benchmark function declaration lines."
   :lighter " GoTest"
   :keymap gotest-mode-map
