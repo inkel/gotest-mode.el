@@ -309,7 +309,9 @@ Signals a user error if point is not inside a test or benchmark."
   (interactive)
   (let ((imenu-generic-expression
          '(("Tests" "^func \\(Test[[:alnum:]_]+\\)(" 1)
-           ("Benchmarks" "^func \\(Benchmark[[:alnum:]_]+\\)(" 1))))
+           ("Benchmarks" "^func \\(Benchmark[[:alnum:]_]+\\)(" 1)))
+        (imenu-create-index-function 'imenu-default-create-index-function)
+        (imenu--index-alist nil))  ; Force rebuild
     (call-interactively 'imenu)))
 
 ;;; Named infix arguments
